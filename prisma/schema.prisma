@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("POSTGRES_PRISMA_URL")
+}
+
+model License {
+  id          String   @id @default(cuid())
+  key         String   @unique
+  isActive    Boolean  @default(true)
+  machineId   String?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  logs        LicenseLog[]
+}
+
+model LicenseLog {
+  id        String   @id @default(cuid())
+  licenseId String
+  action    String
+  ip        String?
+  timestamp DateTime @default(now())
+  license   License  @relation(fields: [licenseId], references: [id])
+}
