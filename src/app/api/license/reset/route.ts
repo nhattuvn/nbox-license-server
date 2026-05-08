@@ -1,11 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { findLicenseDefinition } from "@/lib/license-db";
-import { redisSet, redisGet } from "@/lib/redis-client";
+import { redisGet, redisDel } from "@/lib/redis-client";
 
 function withCors(res: NextResponse): NextResponse {
   res.headers.set("Access-Control-Allow-Origin", "*");
   res.headers.set("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key");
+  res.headers.set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Api-Key, x-admin-secret");
   return res;
 }
 
@@ -17,13 +17,7 @@ export async function OPTIONS() {
   return withCors(new NextResponse(null, { status: 204 }));
 }
 
-/**
- * POST /api/license/reset
- * Admin endpoint để reset machineId binding (cho phép user đổi máy).
- * Yêu cầu ADMIN_SECRET trong header X-Admin-Secret.
- */
 export async function POST(req: NextRequest) {
-  // Check admin secret
   const adminSecret = process.env.ADMIN_SECRET;
   if (!adminSecret) {
     return err(500, "NOT_CONFIGURED", "ADMIN_SECRET chưa được cấu hình.");
@@ -46,7 +40,6 @@ export async function POST(req: NextRequest) {
     return err(400, "INVALID_PAYLOAD", "Thiếu license key.");
   }
 
-  // Check key tồn tại
   const record = findLicenseDefinition(key);
   if (!record) {
     return err(404, "LICENSE_NOT_FOUND", "License key không tồn tại.");
@@ -55,9 +48,9 @@ export async function POST(req: NextRequest) {
   // Lấy machineId cũ để log
   const oldMachineId = await redisGet(`machine:${key}`);
 
-  // Reset: xóa binding
-  await redisSet(`machine:${key}`, "");
-  await redisSet(`activated_at:${key}`, "");
+  // Xóa hẳn binding khỏi Redis
+  await redisDel(`machine:${key}`);
+  await redisDel(`activated_at:${key}`);
 
   return withCors(
     NextResponse.json({

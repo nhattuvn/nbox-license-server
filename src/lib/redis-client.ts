@@ -1,43 +1,37 @@
 /**
- * Redis client dùng Upstash REST API
- * Không cần install package — dùng fetch thuần để tương thích Vercel Edge/Serverless
+ * Upstash Redis REST API client
+ * Dùng KV_REST_API_URL + KV_REST_API_TOKEN (tự động inject bởi Vercel khi connect Redis)
  */
 
-const REDIS_URL = process.env.REDIS_URL || "";
+function getConfig() {
+  const url = process.env.KV_REST_API_URL || "";
+  const token = process.env.KV_REST_API_TOKEN || "";
 
-// Parse redis://default:PASSWORD@HOST:PORT
-function parseRedisUrl(url: string) {
-  try {
-    const u = new URL(url);
-    const password = u.password;
-    const host = u.hostname;
-    const port = u.port || "12805";
-    return { password, host, port };
-  } catch {
-    return null;
+  if (!url || !token) {
+    throw new Error(
+      "Thiếu KV_REST_API_URL hoặc KV_REST_API_TOKEN. Kiểm tra Environment Variables trên Vercel."
+    );
   }
+
+  return { url: url.replace(/\/$/, ""), token };
 }
 
-async function redisCommand(args: (string | number)[]): Promise<unknown> {
-  if (!REDIS_URL) throw new Error("REDIS_URL not set");
+async function upstashFetch(command: string, body: unknown): Promise<unknown> {
+  const { url, token } = getConfig();
 
-  const parsed = parseRedisUrl(REDIS_URL);
-  if (!parsed) throw new Error("Invalid REDIS_URL format");
-
-  // Upstash REST API endpoint
-  const restUrl = `https://${parsed.host}:${parsed.port}`;
-
-  const res = await fetch(`${restUrl}/${args.map(encodeURIComponent).join("/")}`, {
-    method: "GET",
+  const res = await fetch(`${url}/${command}`, {
+    method: "POST",
     headers: {
-      Authorization: `Bearer ${parsed.password}`,
+      Authorization: `Bearer ${token}`,
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify(body),
     cache: "no-store",
   });
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Redis error ${res.status}: ${text}`);
+    throw new Error(`Upstash error ${res.status}: ${text}`);
   }
 
   const json = await res.json();
@@ -45,10 +39,14 @@ async function redisCommand(args: (string | number)[]): Promise<unknown> {
 }
 
 export async function redisGet(key: string): Promise<string | null> {
-  const result = await redisCommand(["GET", key]);
-  return result as string | null;
+  const result = await upstashFetch("get", [key]);
+  return (result as string | null) ?? null;
 }
 
 export async function redisSet(key: string, value: string): Promise<void> {
-  await redisCommand(["SET", key, value]);
+  await upstashFetch("set", [key, value]);
+}
+
+export async function redisDel(key: string): Promise<void> {
+  await upstashFetch("del", [key]);
 }
