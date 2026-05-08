@@ -1,30 +1,33 @@
 /**
  * Upstash Redis REST API client
- * Dùng HTTP thuần — không cần TCP, không timeout, hoạt động 100% trên Vercel Serverless
+ * Docs: https://upstash.com/docs/redis/features/restapi
+ * Dùng POST + JSON body — đúng chuẩn Upstash REST API
  */
 
-const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL || "";
+const UPSTASH_URL = (process.env.UPSTASH_REDIS_REST_URL || "").replace(/\/$/, "");
 const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || "";
 
-async function call(command: string[]): Promise<unknown> {
+async function call(command: unknown[]): Promise<unknown> {
   if (!UPSTASH_URL || !UPSTASH_TOKEN) {
     throw new Error("Thiếu UPSTASH_REDIS_REST_URL hoặc UPSTASH_REDIS_REST_TOKEN.");
   }
 
-  const res = await fetch(`${UPSTASH_URL}/${command.map(encodeURIComponent).join("/")}`, {
-    method: "GET",
+  const res = await fetch(UPSTASH_URL, {
+    method: "POST",
     headers: {
       Authorization: `Bearer ${UPSTASH_TOKEN}`,
+      "Content-Type": "application/json",
     },
+    body: JSON.stringify(command),
     cache: "no-store",
   });
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`Upstash error ${res.status}: ${text}`);
+  const json = await res.json();
+
+  if (!res.ok || json.error) {
+    throw new Error(`Upstash error: ${json.error || res.status}`);
   }
 
-  const json = await res.json();
   return json.result;
 }
 
