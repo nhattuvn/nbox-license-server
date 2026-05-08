@@ -1,24 +1,13 @@
 /**
  * License Database
  * ----------------
- * Lưu trữ licenses dưới dạng JSON trong biến môi trường LICENSES_JSON.
- * Format:
- * [
- *   {
- *     "key": "NBOX-XXXX-YYYY-ZZZZ",
- *     "isActive": true,
- *     "expiresAt": "2027-12-31T23:59:59.000Z",
- *     "machineId": null,
- *     "activatedAt": null,
- *     "config": null
- *   }
- * ]
+ * - License definitions (key, isActive, expiresAt, config) đọc từ LICENSES_JSON env var
+ * - machineId binding được persist vào Redis (Upstash) → không bị mất khi cold start
  *
- * Để thêm license: cập nhật biến môi trường LICENSES_JSON trên Vercel.
- * Lưu ý: machineId sẽ được persist vào env thông qua Vercel API (nếu cấu hình),
- * hoặc chỉ in-memory (reset khi redeploy). Dùng LICENSES_JSON_MUTABLE=true để
- * enable Vercel env write-back qua VERCEL_TOKEN + VERCEL_PROJECT_ID.
+ * Redis key format: "machine:{licenseKey}" → machineId string
  */
+
+import { redisGet, redisSet } from "./redis-client";
 
 export interface LicenseRecord {
   key: string;
@@ -29,7 +18,7 @@ export interface LicenseRecord {
   config?: Record<string, unknown> | null;
 }
 
-// In-memory cache (sẽ reset khi serverless function cold start)
+// In-memory cache cho license definitions (chỉ reset khi redeploy — OK vì LICENSES_JSON không đổi thường xuyên)
 let _cache: LicenseRecord[] | null = null;
 
 function loadLicenses(): LicenseRecord[] {
@@ -37,7 +26,7 @@ function loadLicenses(): LicenseRecord[] {
 
   const raw = process.env.LICENSES_JSON;
   if (!raw) {
-    console.warn("[nbox-license] LICENSES_JSON env not set. No licenses available.");
+    console.warn("[nbox-license] LICENSES_JSON env not set.");
     _cache = [];
     return _cache;
   }
@@ -54,22 +43,35 @@ function loadLicenses(): LicenseRecord[] {
   }
 }
 
-export function findLicense(key: string): LicenseRecord | undefined {
+export function findLicenseDefinition(key: string): LicenseRecord | undefined {
   const licenses = loadLicenses();
   return licenses.find((l) => l.key === key);
 }
 
 /**
- * Bind machineId vào license (in-memory only).
- * Với Vercel serverless, state này KHÔNG persist giữa các invocations.
- * Để persist: dùng Vercel KV, PlanetScale, hoặc Supabase (xem README).
+ * Lấy machineId đã bind từ Redis.
+ * Trả về null nếu chưa bind.
  */
-export function bindMachine(key: string, machineId: string): void {
-  const licenses = loadLicenses();
-  const record = licenses.find((l) => l.key === key);
-  if (record) {
-    record.machineId = machineId;
-    record.activatedAt = new Date().toISOString();
+export async function getBoundMachineId(licenseKey: string): Promise<string | null> {
+  try {
+    const val = await redisGet(`machine:${licenseKey}`);
+    return val ?? null;
+  } catch (e) {
+    console.error("[nbox-license] Redis GET error:", e);
+    return null;
+  }
+}
+
+/**
+ * Persist machineId binding vào Redis — tồn tại vĩnh viễn.
+ */
+export async function bindMachine(licenseKey: string, machineId: string): Promise<void> {
+  try {
+    await redisSet(`machine:${licenseKey}`, machineId);
+    await redisSet(`activated_at:${licenseKey}`, new Date().toISOString());
+  } catch (e) {
+    console.error("[nbox-license] Redis SET error:", e);
+    throw e;
   }
 }
 

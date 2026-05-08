@@ -2,15 +2,13 @@
   "name": "nbox-license-server",
   "version": "1.0.0",
   "private": true,
- "scripts": {
-  "dev": "next dev",
-  "build": "prisma generate && next build", 
-  "start": "next start",
-  "lint": "next lint"
-},
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
   "dependencies": {
-    "@prisma/client": "^6.19.3",
-    "dotenv": "^17.4.2",
     "next": "14.2.5",
     "react": "^18",
     "react-dom": "^18"
@@ -18,7 +16,6 @@
   "devDependencies": {
     "@types/node": "^20",
     "@types/react": "^18",
-    "prisma": "^6.19.3",
     "typescript": "^5"
   }
 }
