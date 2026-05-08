@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findLicenseDefinition } from "@/lib/license-db";
-import { redisGet, redisDel } from "@/lib/redis-client";
+import { resetMachine } from "@/lib/license-db";
 
 function withCors(res: NextResponse): NextResponse {
   res.headers.set("Access-Control-Allow-Origin", "*");
@@ -19,44 +18,23 @@ export async function OPTIONS() {
 
 export async function POST(req: NextRequest) {
   const adminSecret = process.env.ADMIN_SECRET;
-  if (!adminSecret) {
-    return err(500, "NOT_CONFIGURED", "ADMIN_SECRET chưa được cấu hình.");
-  }
+  if (!adminSecret) return err(500, "NOT_CONFIGURED", "ADMIN_SECRET chưa được cấu hình.");
 
   const headerSecret = req.headers.get("x-admin-secret");
-  if (headerSecret !== adminSecret) {
-    return err(401, "UNAUTHORIZED", "Admin secret không đúng.");
-  }
+  if (headerSecret !== adminSecret) return err(401, "UNAUTHORIZED", "Admin secret không đúng.");
 
   let body: { key?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return err(400, "INVALID_PAYLOAD", "Request body phải là JSON.");
-  }
+  try { body = await req.json(); }
+  catch { return err(400, "INVALID_PAYLOAD", "Request body phải là JSON."); }
 
   const key = String(body.key || "").trim();
-  if (!key) {
-    return err(400, "INVALID_PAYLOAD", "Thiếu license key.");
-  }
+  if (!key) return err(400, "INVALID_PAYLOAD", "Thiếu license key.");
 
-  const record = findLicenseDefinition(key);
-  if (!record) {
-    return err(404, "LICENSE_NOT_FOUND", "License key không tồn tại.");
-  }
+  const oldMachineId = await resetMachine(key);
 
-  // Lấy machineId cũ để log
-  const oldMachineId = await redisGet(`machine:${key}`);
-
-  // Xóa hẳn binding khỏi Redis
-  await redisDel(`machine:${key}`);
-  await redisDel(`activated_at:${key}`);
-
-  return withCors(
-    NextResponse.json({
-      status: "success",
-      message: `Đã reset machineId cho key ${key}.`,
-      previousMachineId: oldMachineId || null,
-    })
-  );
+  return withCors(NextResponse.json({
+    status: "success",
+    message: `Đã reset machineId cho key ${key}.`,
+    previousMachineId: oldMachineId,
+  }));
 }
