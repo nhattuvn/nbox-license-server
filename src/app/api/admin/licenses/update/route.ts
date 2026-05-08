@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { resetMachine } from "@/lib/license-db";
+import { updateLicense } from "@/lib/license-db";
 
 function auth(req: NextRequest) {
   return req.headers.get("x-admin-secret") === (process.env.ADMIN_SECRET || "");
@@ -7,8 +7,8 @@ function auth(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   if (!auth(req)) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
-  const { key } = await req.json();
+  const { key, ...patch } = await req.json();
   if (!key) return NextResponse.json({ status: "error", message: "Thiếu key" }, { status: 400 });
-  const old = await resetMachine(key);
-  return NextResponse.json({ status: "success", message: `Reset thành công`, previousMachineId: old });
+  await updateLicense(key, patch);
+  return NextResponse.json({ status: "success", message: "Đã cập nhật" });
 }

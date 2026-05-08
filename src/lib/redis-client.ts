@@ -1,7 +1,6 @@
 /**
  * Upstash Redis REST API client
- * Docs: https://upstash.com/docs/redis/features/restapi
- * Dùng POST + JSON body — đúng chuẩn Upstash REST API
+ * POST + JSON body — đúng chuẩn Upstash
  */
 
 const UPSTASH_URL = (process.env.UPSTASH_REDIS_REST_URL || "").replace(/\/$/, "");
@@ -23,17 +22,14 @@ async function call(command: unknown[]): Promise<unknown> {
   });
 
   const json = await res.json();
-
   if (!res.ok || json.error) {
     throw new Error(`Upstash error: ${json.error || res.status}`);
   }
-
   return json.result;
 }
 
 export async function redisGet(key: string): Promise<string | null> {
-  const result = await call(["GET", key]);
-  return (result as string | null) ?? null;
+  return (await call(["GET", key])) as string | null;
 }
 
 export async function redisSet(key: string, value: string): Promise<void> {
@@ -42,4 +38,17 @@ export async function redisSet(key: string, value: string): Promise<void> {
 
 export async function redisDel(key: string): Promise<void> {
   await call(["DEL", key]);
+}
+
+export async function redisSadd(setKey: string, member: string): Promise<void> {
+  await call(["SADD", setKey, member]);
+}
+
+export async function redisSrem(setKey: string, member: string): Promise<void> {
+  await call(["SREM", setKey, member]);
+}
+
+export async function redisSmembers(setKey: string): Promise<string[]> {
+  const result = await call(["SMEMBERS", setKey]);
+  return (result as string[]) ?? [];
 }

@@ -1,61 +1,31 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findLicenseDefinition } from "@/lib/license-db";
-import { redisGet } from "@/lib/redis-client";
+import { getAllLicenses, createLicense } from "@/lib/license-db";
 
-function authCheck(req: NextRequest): boolean {
-  const secret = process.env.ADMIN_SECRET || "";
-  return req.headers.get("x-admin-secret") === secret;
+function auth(req: NextRequest) {
+  return req.headers.get("x-admin-secret") === (process.env.ADMIN_SECRET || "");
 }
 
-function err(status: number, message: string) {
-  return NextResponse.json({ status: "error", message }, { status });
-}
-
-// GET /api/admin/licenses — list all licenses
+// GET — list all
 export async function GET(req: NextRequest) {
-  if (!authCheck(req)) return err(401, "Unauthorized");
+  if (!auth(req)) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
+  const licenses = await getAllLicenses();
+  return NextResponse.json({ status: "success", licenses });
+}
 
-  const raw = process.env.LICENSES_JSON || "[]";
-  let licenses: {
-    key: string;
-    isActive: boolean;
-    expiresAt: string | null;
-    machineId?: string | null;
-    activatedAt?: string | null;
-    config?: unknown;
-  }[] = [];
+// POST — create new
+export async function POST(req: NextRequest) {
+  if (!auth(req)) return NextResponse.json({ status: "error", message: "Unauthorized" }, { status: 401 });
 
-  try {
-    licenses = JSON.parse(raw);
-  } catch {
-    return err(500, "LICENSES_JSON parse error");
-  }
+  const { key, expiresAt, isActive } = await req.json();
+  if (!key?.trim()) return NextResponse.json({ status: "error", message: "Thiếu key" }, { status: 400 });
 
-  // Enrich với machineId từ Redis
-  const enriched = await Promise.all(
-    licenses.map(async (l) => {
-      const machineId = await redisGet(`machine:${l.key}`).catch(() => null);
-      const activatedAt = await redisGet(`activated_at:${l.key}`).catch(() => null);
-      const now = new Date();
-      const expired = l.expiresAt ? now > new Date(l.expiresAt) : false;
+  await createLicense({
+    key: key.trim(),
+    isActive: isActive !== false,
+    expiresAt: expiresAt || null,
+    config: null,
+    createdAt: new Date().toISOString(),
+  });
 
-      return {
-        key: l.key,
-        isActive: l.isActive,
-        expiresAt: l.expiresAt,
-        machineId: machineId || null,
-        activatedAt: activatedAt || null,
-        expired,
-        status: !l.isActive
-          ? "inactive"
-          : expired
-          ? "expired"
-          : machineId
-          ? "activated"
-          : "unused",
-      };
-    })
-  );
-
-  return NextResponse.json({ status: "success", licenses: enriched });
+  return NextResponse.json({ status: "success", message: `Đã tạo key ${key}` });
 }

@@ -1,12 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { findLicenseDefinition, getBoundMachineId, bindMachine } from "@/lib/license-db";
-
-interface VerifyBody {
-  key: string;
-  machineId: string;
-  extensionVersion?: string;
-  channel?: string;
-}
+import { findLicense, getBoundMachineId, bindMachine } from "@/lib/license-db";
 
 const DEFAULT_CONFIG = {
   selectorOverrides: {
@@ -35,10 +28,8 @@ function withCors(res: NextResponse): NextResponse {
   return res;
 }
 
-function err(status: number, code: string, message: string): NextResponse {
-  return withCors(
-    NextResponse.json({ status: "error", code, message }, { status })
-  );
+function err(status: number, code: string, message: string) {
+  return withCors(NextResponse.json({ status: "error", code, message }, { status }));
 }
 
 export async function OPTIONS() {
@@ -46,79 +37,44 @@ export async function OPTIONS() {
 }
 
 export async function POST(req: NextRequest) {
-  let body: Partial<VerifyBody>;
-  try {
-    body = await req.json();
-  } catch {
-    return err(400, "INVALID_PAYLOAD", "Request body phải là JSON hợp lệ.");
-  }
+  let body: { key?: string; machineId?: string; extensionVersion?: string; channel?: string };
+  try { body = await req.json(); }
+  catch { return err(400, "INVALID_PAYLOAD", "Request body phải là JSON hợp lệ."); }
 
   const key = String(body.key || "").trim();
   const machineId = String(body.machineId || "").trim();
 
-  if (!key || !machineId) {
-    return err(400, "INVALID_PAYLOAD", "Thiếu key hoặc machineId.");
-  }
+  if (!key || !machineId) return err(400, "INVALID_PAYLOAD", "Thiếu key hoặc machineId.");
 
-  const record = findLicenseDefinition(key);
-  if (!record) {
-    return err(401, "LICENSE_NOT_FOUND", "License key không tồn tại.");
-  }
-
-  if (!record.isActive) {
-    return err(401, "LICENSE_INACTIVE", "License đã bị khóa hoặc revoke.");
-  }
+  const record = await findLicense(key);
+  if (!record) return err(401, "LICENSE_NOT_FOUND", "License key không tồn tại.");
+  if (!record.isActive) return err(401, "LICENSE_INACTIVE", "License đã bị khóa.");
 
   if (record.expiresAt) {
-    const expiry = new Date(record.expiresAt);
-    if (isNaN(expiry.getTime())) {
-      return err(500, "INTERNAL_ERROR", "Dữ liệu license không hợp lệ.");
-    }
-    if (Date.now() > expiry.getTime()) {
+    if (Date.now() > new Date(record.expiresAt).getTime()) {
       return err(401, "LICENSE_EXPIRED", "License đã hết hạn.");
     }
   }
 
-  // Machine binding via Redis
   let boundMachineId: string | null = null;
-  try {
-    boundMachineId = await getBoundMachineId(key);
-  } catch {
-    return err(500, "INTERNAL_ERROR", "Không thể kết nối database. Thử lại sau.");
-  }
+  try { boundMachineId = await getBoundMachineId(key); }
+  catch { return err(500, "INTERNAL_ERROR", "Không thể kết nối database."); }
 
   if (!boundMachineId) {
-    try {
-      await bindMachine(key, machineId);
-    } catch {
-      return err(500, "INTERNAL_ERROR", "Không thể lưu thông tin kích hoạt.");
-    }
+    try { await bindMachine(key, machineId); }
+    catch { return err(500, "INTERNAL_ERROR", "Không thể lưu kích hoạt."); }
   } else if (boundMachineId !== machineId) {
-    return err(403, "MACHINE_MISMATCH", "License đã được kích hoạt trên máy khác. Liên hệ admin để reset.");
+    return err(403, "MACHINE_MISMATCH", "License đã kích hoạt trên máy khác. Liên hệ admin để reset.");
   }
 
   const parts = key.split("-");
-  const keyMasked =
-    parts.length >= 3
-      ? [parts[0], "****", ...parts.slice(2)].join("-")
-      : key.slice(0, 4) + "****";
-
+  const keyMasked = parts.length >= 3 ? [parts[0], "****", ...parts.slice(2)].join("-") : key.slice(0, 4) + "****";
   const config = record.config ?? DEFAULT_CONFIG;
 
-  return withCors(
-    NextResponse.json(
-      {
-        status: "success",
-        license: {
-          keyMasked,
-          isActive: true,
-          expiresAt: record.expiresAt ?? null,
-          machineId: boundMachineId ?? machineId,
-        },
-        config,
-        serverTime: new Date().toISOString(),
-      },
-      { status: 200 }
-    )
-  );
+  return withCors(NextResponse.json({
+    status: "success",
+    license: { keyMasked, isActive: true, expiresAt: record.expiresAt ?? null, machineId: boundMachineId ?? machineId },
+    config,
+    serverTime: new Date().toISOString(),
+  }));
 }
