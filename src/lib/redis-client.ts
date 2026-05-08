@@ -1,57 +1,42 @@
 /**
- * Redis Cloud client - dùng package "redis" v4
- * Compatible với Vercel Serverless (Node.js runtime)
+ * Upstash Redis REST API client
+ * Dùng HTTP thuần — không cần TCP, không timeout, hoạt động 100% trên Vercel Serverless
  */
 
-import { createClient, RedisClientType } from "redis";
+const UPSTASH_URL = process.env.UPSTASH_REDIS_REST_URL || "";
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN || "";
 
-const REDIS_URL = process.env.REDIS_URL || "";
+async function call(command: string[]): Promise<unknown> {
+  if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+    throw new Error("Thiếu UPSTASH_REDIS_REST_URL hoặc UPSTASH_REDIS_REST_TOKEN.");
+  }
 
-let _client: RedisClientType | null = null;
-let _connecting = false;
-let _connectPromise: Promise<RedisClientType> | null = null;
+  const res = await fetch(`${UPSTASH_URL}/${command.map(encodeURIComponent).join("/")}`, {
+    method: "GET",
+    headers: {
+      Authorization: `Bearer ${UPSTASH_TOKEN}`,
+    },
+    cache: "no-store",
+  });
 
-async function getClient(): Promise<RedisClientType> {
-  if (_client && _client.isOpen) return _client;
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Upstash error ${res.status}: ${text}`);
+  }
 
-  if (_connectPromise) return _connectPromise;
-
-  _connectPromise = (async () => {
-    if (!REDIS_URL) throw new Error("REDIS_URL not set in environment variables.");
-
-    const client = createClient({
-      url: REDIS_URL,
-      socket: {
-        tls: REDIS_URL.startsWith("rediss://"),
-        rejectUnauthorized: false,
-        connectTimeout: 8000,
-      },
-    }) as RedisClientType;
-
-    client.on("error", (err) => {
-      console.error("[nbox-redis] Connection error:", err.message);
-    });
-
-    await client.connect();
-    _client = client;
-    _connectPromise = null;
-    return client;
-  })();
-
-  return _connectPromise;
+  const json = await res.json();
+  return json.result;
 }
 
 export async function redisGet(key: string): Promise<string | null> {
-  const client = await getClient();
-  return await client.get(key);
+  const result = await call(["GET", key]);
+  return (result as string | null) ?? null;
 }
 
 export async function redisSet(key: string, value: string): Promise<void> {
-  const client = await getClient();
-  await client.set(key, value);
+  await call(["SET", key, value]);
 }
 
 export async function redisDel(key: string): Promise<void> {
-  const client = await getClient();
-  await client.del(key);
+  await call(["DEL", key]);
 }
